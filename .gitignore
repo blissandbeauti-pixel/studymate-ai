@@ -1,0 +1,25 @@
+# Secret files — never upload these
+.env
+*.db
+studymate.db
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# VS Code
+.vscode/
+
+# Streamlit local config
+.streamlit/secrets.toml
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Temp files
+*.tmp
+*.log
