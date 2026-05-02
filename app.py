@@ -1523,7 +1523,7 @@ else:
     show_share_bar(APP_URL)
     st.write("")
 
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
         "🏠 Dashboard",
         "🚀 Generate MCQs",
         "📝 Smart Notes",
@@ -1534,6 +1534,7 @@ else:
         "📄 Past Papers",
         "👥 Community",
         "📖 History",
+        "💙 Support Us"
     ])
 
     with tab1:
@@ -1556,7 +1557,9 @@ else:
         show_community_page(user)
     with tab10:
         show_history_page()
-
+    with tab11:
+        show_support_page()
+        
 # ── Footer ──
 st.divider()
 st.markdown("""
