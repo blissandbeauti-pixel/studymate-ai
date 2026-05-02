@@ -11,6 +11,13 @@ from database import (
     get_full_stats, delete_user,
     get_past_papers, save_past_paper
 )
+from database import (
+    get_all_users, get_all_suggestions,
+    get_full_stats, delete_user,
+    get_past_papers, save_past_paper,
+    save_admin_note, get_admin_notes,
+    delete_admin_note
+)
 
 
 # ============================================
@@ -624,7 +631,261 @@ def show_sub_admin_management(current_admin):
                     else:
                         st.error("❌ Minimum 8 characters required.")
 
+# ============================================
+# ADMIN NOTES MANAGEMENT
+# ============================================
 
+def show_notes_admin():
+    """Admin: Upload and manage study notes"""
+    st.markdown("### 📝 Study Notes Management")
+
+    st.markdown("""
+    <div style='background:#E3F2FD; border-radius:8px;
+    padding:10px 15px; font-size:13px; color:#1565C0;
+    margin-bottom:15px; border-left:4px solid #1565C0'>
+        ℹ️ Upload study notes, handouts, summaries or
+        any reference material for students.
+        Supported: PDF, Word (.docx), Images, Text files.
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Upload Form ──
+    with st.expander("➕ Upload New Notes", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            note_title = st.text_input(
+                "📋 Title",
+                placeholder="e.g. Cardiovascular System Notes"
+            )
+            note_subject = st.text_input(
+                "📖 Subject",
+                placeholder="e.g. Anatomy, Physics"
+            )
+            note_program = st.text_input(
+                "🎓 Program",
+                placeholder="e.g. BSN Nursing, FSc Pre-Medical"
+            )
+            note_board = st.text_input(
+                "🏫 Board / University",
+                placeholder="e.g. FBISE, KEMU, General"
+            )
+        with col2:
+            note_year = st.selectbox(
+                "📅 Year / Semester",
+                [
+                    "All Years",
+                    "1st Year / Semester 1",
+                    "1st Year / Semester 2",
+                    "2nd Year / Semester 3",
+                    "2nd Year / Semester 4",
+                    "3rd Year / Semester 5",
+                    "3rd Year / Semester 6",
+                    "4th Year / Semester 7",
+                    "4th Year / Semester 8",
+                ]
+            )
+            note_topic = st.text_input(
+                "🔍 Topic / Chapter",
+                placeholder="e.g. Heart Structure, Thermodynamics"
+            )
+            note_description = st.text_area(
+                "📝 Description (optional)",
+                placeholder=(
+                    "Brief description of what these "
+                    "notes cover..."
+                ),
+                height=80
+            )
+
+        uploaded_note = st.file_uploader(
+            "📁 Upload File",
+            type=["pdf", "docx", "doc", "txt",
+                  "png", "jpg", "jpeg"],
+            key="admin_note_upload",
+            help="Max file size: 200MB"
+        )
+
+        if uploaded_note:
+            file_size = len(uploaded_note.getvalue()) / 1024
+            st.caption(
+                f"📎 {uploaded_note.name} "
+                f"({file_size:.1f} KB) — "
+                f"Type: {uploaded_note.type}"
+            )
+
+        if st.button(
+            "💾 Upload Notes",
+            use_container_width=True,
+            key="upload_notes_btn"
+        ):
+            errors = []
+            if not note_title.strip():
+                errors.append("Title is required")
+            if not note_subject.strip():
+                errors.append("Subject is required")
+            if uploaded_note is None:
+                errors.append("Please select a file to upload")
+
+            if errors:
+                for e in errors:
+                    st.error(f"❌ {e}")
+            else:
+                import os
+                os.makedirs("admin_notes", exist_ok=True)
+
+                # Safe filename
+                safe_name = uploaded_note.name.replace(
+                    " ", "_"
+                )
+                file_path = f"admin_notes/{safe_name}"
+
+                with open(file_path, "wb") as f:
+                    f.write(uploaded_note.getbuffer())
+
+                # Determine file type label
+                ext = uploaded_note.name.split(".")[-1].lower()
+                type_labels = {
+                    "pdf":  "PDF Document",
+                    "docx": "Word Document",
+                    "doc":  "Word Document",
+                    "txt":  "Text File",
+                    "png":  "Image",
+                    "jpg":  "Image",
+                    "jpeg": "Image",
+                }
+                file_type = type_labels.get(ext, "File")
+
+                saved = save_admin_note(
+                    title       = note_title.strip(),
+                    subject     = note_subject.strip(),
+                    program     = note_program.strip(),
+                    board       = note_board.strip(),
+                    year        = note_year,
+                    topic       = note_topic.strip(),
+                    description = note_description.strip(),
+                    file_path   = file_path,
+                    file_type   = file_type,
+                    uploaded_by = "Admin"
+                )
+
+                if saved:
+                    st.success(
+                        f"✅ '{note_title}' uploaded successfully!"
+                    )
+                    st.rerun()
+                else:
+                    st.error("❌ Could not save. Please try again.")
+
+    st.divider()
+
+    # ── Filter & View ──
+    st.markdown("#### 📚 All Uploaded Notes")
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        f_subject = st.text_input(
+            "🔍 Filter by Subject",
+            placeholder="e.g. Biology",
+            key="filter_note_subject"
+        )
+    with col2:
+        f_program = st.text_input(
+            "🎓 Filter by Program",
+            placeholder="e.g. BSN",
+            key="filter_note_program"
+        )
+    with col3:
+        f_topic = st.text_input(
+            "🔍 Filter by Topic",
+            placeholder="e.g. Nervous System",
+            key="filter_note_topic"
+        )
+
+    notes = get_admin_notes(
+        program = f_program if f_program else None,
+        subject = f_subject if f_subject else None,
+        topic   = f_topic   if f_topic   else None,
+    )
+
+    st.markdown(f"**Total: {len(notes)} notes uploaded**")
+    st.divider()
+
+    if not notes:
+        st.info("No notes uploaded yet.")
+        return
+
+    # File type icons
+    type_icons = {
+        "PDF Document":  "📄",
+        "Word Document": "📝",
+        "Text File":     "📃",
+        "Image":         "🖼️",
+        "File":          "📁",
+    }
+
+    for n in notes:
+        icon = type_icons.get(n.get("file_type", ""), "📁")
+
+        with st.expander(
+            f"{icon} {n['title']}  |  "
+            f"{n['subject']}  |  "
+            f"{n['created_at'][:10]}"
+        ):
+            col1, col2 = st.columns([3, 1])
+            with col1:
+                st.markdown(f"""
+                <div class="admin-card">
+                    <b>{icon} {n['title']}</b><br>
+                    <small style='color:gray; line-height:2'>
+                        📖 Subject: <b>{n['subject']}</b> &nbsp;|&nbsp;
+                        🔍 Topic: {n.get('topic','—')}<br>
+                        🎓 Program: {n.get('program','—')} &nbsp;|&nbsp;
+                        🏫 Board: {n.get('board','—')}<br>
+                        📅 Year: {n.get('year','—')} &nbsp;|&nbsp;
+                        📁 Type: {n.get('file_type','—')} &nbsp;|&nbsp;
+                        ⬇️ Downloads: {n.get('downloads',0)}<br>
+                        🗓️ Uploaded: {n['created_at'][:16]}
+                    </small>
+                    {f"<br><small style='color:#555'>{n['description']}</small>" if n.get('description') else ""}
+                </div>
+                """, unsafe_allow_html=True)
+
+            with col2:
+                st.write("")
+                # Download button
+                try:
+                    with open(n["file_path"], "rb") as f:
+                        file_bytes = f.read()
+                    st.download_button(
+                        "📥 Download",
+                        data=file_bytes,
+                        file_name=n["file_path"].split("/")[-1],
+                        use_container_width=True,
+                        key=f"dl_note_{n['id']}"
+                    )
+                except FileNotFoundError:
+                    st.warning("File not found on disk.")
+
+                st.write("")
+
+                # Delete button
+                if st.button(
+                    "🗑️ Delete",
+                    key=f"del_note_{n['id']}",
+                    use_container_width=True
+                ):
+                    # Delete file from disk too
+                    import os
+                    try:
+                        if os.path.exists(n["file_path"]):
+                            os.remove(n["file_path"])
+                    except Exception:
+                        pass
+                    if delete_admin_note(n["id"]):
+                        st.success("✅ Deleted.")
+                        st.rerun()
+                    else:
+                        st.error("❌ Could not delete.")
 # ============================================
 # 6. MAIN ADMIN PAGE ENTRY POINT
 # ← Must be defined LAST
@@ -707,11 +968,12 @@ def show_admin_page():
     st.divider()
 
     # ── Admin Tabs ──
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
         "📊 Dashboard",
         "👥 Users",
         "🛡️ Sub-Admins",
         "💬 Suggestions",
+        "📝 Notes",
         "📄 Past Papers"
     ])
 
@@ -724,4 +986,6 @@ def show_admin_page():
     with tab4:
         show_suggestions()
     with tab5:
+        show_notes_admin()
+    with tab6:
         show_past_papers_admin()

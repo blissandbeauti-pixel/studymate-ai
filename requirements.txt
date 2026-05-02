@@ -1,14 +1,6 @@
-<<<<<<< HEAD
 streamlit==1.45.0
 groq==0.28.0
 google-genai==1.12.1
 ollama==0.6.1
 python-dotenv==1.1.0
-=======
-streamlit==1.45.0
-groq==0.28.0
-google-genai==1.12.1
-ollama==0.6.1
-python-dotenv==1.1.0
->>>>>>> b09323630fd2f2924f4f0231828396c7cbd43d21
 reportlab==4.4.1

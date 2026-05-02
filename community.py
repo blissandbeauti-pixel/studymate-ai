@@ -63,10 +63,11 @@ def show_teacher_directory():
             placeholder="e.g. Lahore, Karachi"
         )
     with col3:
-        st.write("")
+        
         st.write("")
         search_btn = st.button(
-            "🔍 Search", use_container_width=True
+        "🔍 Search", use_container_width=True,
+        key="community_search_btn"
         )
 
     teachers = get_all_teachers(
