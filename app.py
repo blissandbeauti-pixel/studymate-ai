@@ -51,10 +51,38 @@ from student_features import (
     show_past_papers_student,
     show_admin_notes_student
 )
+from chat_tutor import show_chat_tutor
+from streak_tracker import show_streak_tracker
+from database import (
+    initialize_database, save_mcq_history,
+    get_user_history, save_assessment,
+    get_user_assessments, get_user_stats,
+    save_suggestion, get_app_stats,
+    update_streak, get_streak,
+    get_user_preferences, save_user_preferences
+)
+# Import institutions data
+from institutions import (
+    get_boards_flat, get_universities_flat,
+    get_entry_tests_flat, get_programs_flat,
+    get_testing_authorities
+)
+from session_manager import (
+    init_sessions_table,
+    create_session,
+    validate_session,
+    delete_session
+)
+# from learning_platform import show_learning_platform
+
+@st.cache_data(ttl=60)
+def cached_app_stats():
+    return get_app_stats()
 
 # ============================================
 # INITIALIZE DATABASE
 # ============================================
+init_sessions_table()
 
 initialize_database()
 
@@ -181,6 +209,23 @@ st.markdown("""
         color: #555;
         margin: 8px 0;
     }
+            /* Courses big button */
+    div[data-testid="stButton"] button[kind="primary"] {
+        background: linear-gradient(135deg, #1565C0, #42A5F5) !important;
+        color: white !important;
+        font-size: 20px !important;
+        font-weight: 800 !important;
+        padding: 18px 40px !important;
+        border-radius: 12px !important;
+        border: none !important;
+        letter-spacing: 2px !important;
+        box-shadow: 0 4px 20px rgba(21, 101, 192, 0.4) !important;
+        transition: transform 0.2s !important;
+    }
+    div[data-testid="stButton"] button[kind="primary"]:hover {
+        transform: scale(1.03) !important;
+        box-shadow: 0 6px 25px rgba(21, 101, 192, 0.5) !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -238,58 +283,11 @@ USEFUL_LINKS = {
 # DATA
 # ============================================
 
-BOARDS = [
-    "Federal Board (FBISE)",
-    "BISE Lahore", "BISE Rawalpindi", "BISE Gujranwala",
-    "BISE Faisalabad", "BISE Multan", "BISE Sahiwal",
-    "BISE Sargodha", "BISE DG Khan", "BISE Bahawalpur",
-    "BISE Karachi", "BISE Hyderabad", "BISE Sukkur",
-    "BISE Peshawar", "BISE Mardan", "BISE Abbottabad",
-    "BISE Swat", "BISE Mirpur (AJK)", "BISE Muzaffarabad (AJK)",
-    "Other Board"
-]
-
-UNIVERSITIES = [
-    "General / Any University",
-    "── Medical ──",
-    "NUMS", "Dow University", "King Edward Medical University (KEMU)",
-    "Aga Khan University", "Allama Iqbal Medical College",
-    "Rawalpindi Medical University (RMU)", "Army Medical College",
-    "── Engineering ──",
-    "NUST", "UET Lahore", "UET Peshawar",
-    "COMSATS University", "NED University", "PIEAS",
-    "── General ──",
-    "Punjab University (PU)", "University of Karachi",
-    "Quaid-i-Azam University (QAU)", "University of Peshawar",
-    "FAST-NUCES", "Bahria University", "Air University",
-    "Virtual University (VU)", "Other University"
-]
-
-ENTRY_TESTS = [
-    "MDCAT (Medical Colleges)", "ECAT (Engineering Colleges)",
-    "NUMS Test (Military Medical)", "NET (NUST Entry Test)",
-    "Aga Khan Entry Test", "FAST Entry Test (NUCES)",
-    "COMSATS Entry Test", "UET Entry Test",
-    "NTS Based Test", "Other Entry Test"
-]
-
-PROGRAMS = [
-    "── Medical / Health ──",
-    "BSN Nursing (Generic)", "BSN Nursing (Post RN)",
-    "MBBS", "BDS (Dentistry)", "Pharm-D",
-    "DPT (Physiotherapy)", "MLT (Medical Lab Technology)",
-    "── Engineering ──",
-    "DAE Civil Engineering", "DAE Electrical Engineering",
-    "DAE Mechanical Engineering", "DAE Computer Information Technology",
-    "DAE Electronics", "BE/BSc Civil Engineering",
-    "BE/BSc Electrical Engineering", "BE/BSc Mechanical Engineering",
-    "BS Computer Science", "BS Software Engineering",
-    "── Science ──",
-    "FSc Pre-Medical", "FSc Pre-Engineering",
-    "BSc Physics", "BSc Chemistry", "BSc Biology", "BSc Mathematics",
-    "── General ──",
-    "BA/BSc General", "BBA / MBA", "BS English", "Other Program"
-]
+# lists of Boards, Universities, Entry Tests, Programs for dropdowns:
+BOARDS          = get_boards_flat()
+UNIVERSITIES    = get_universities_flat()
+ENTRY_TESTS     = get_entry_tests_flat()
+PROGRAMS        = get_programs_flat()
 
 YEARS = [
     "1st Year / Semester 1", "1st Year / Semester 2",
@@ -314,6 +312,17 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "user" not in st.session_state:
     st.session_state.user = None
+if "session_token" not in st.session_state: #added from this line
+    st.session_state.session_token = None   #added
+# ── Auto-restore login from token ──
+if (not st.session_state.logged_in and      #added
+        st.session_state.session_token):
+    restored = validate_session(
+        st.session_state.session_token
+    )
+    if restored:
+        st.session_state.logged_in = True
+        st.session_state.user      = restored   #added to this line
 if "current_mcqs" not in st.session_state:
     st.session_state.current_mcqs = None
 if "current_meta" not in st.session_state:
@@ -322,6 +331,8 @@ if "parsed_mcqs" not in st.session_state:
     st.session_state.parsed_mcqs = []
 if "daily_tip" not in st.session_state:
     st.session_state.daily_tip = random.choice(STUDY_TIPS)
+if "show_courses" not in st.session_state:
+    st.session_state.show_courses = False
 
 
 # ============================================
@@ -342,18 +353,41 @@ def show_sidebar():
         """, unsafe_allow_html=True)
         st.divider()
 
-        # ── App Stats ──
-        # stats = get_app_stats()
-        # st.markdown("### 📊 App Stats")
-        # col1, col2 = st.columns(2)
-        # with col1:
-            # st.metric("👥 Students", stats["total_users"])
-            # st.metric("📖 Sessions", stats["total_sessions"])
-        # with col2:
-            # st.metric("❓ MCQs", f"{stats['total_mcqs']:,}")
-            # st.metric("📝 Tests", stats["total_tests"])
+        # ── Language Toggle ──
+        st.markdown("### 🌐 Language / زبان")
+        lang = st.session_state.get("language", "english")
+        lang_choice = st.radio(
+            "Select Language",
+            ["🇬🇧 English", "🇵🇰 اردو"],
+            index=0 if lang == "english" else 1,
+            key="sidebar_lang_toggle",
+            horizontal=True,
+            label_visibility="collapsed"
+        )
+        new_lang = "urdu" if "اردو" in lang_choice else "english"
+        if new_lang != lang:
+            st.session_state.language = new_lang
+            save_user_preferences(
+                st.session_state.user["id"]
+                if st.session_state.logged_in else 0,
+                language=new_lang
+            )
+            st.rerun()
+        st.divider()
 
-        # st.divider()
+        # ── App Stats ──
+        stats = get_app_stats()
+        # stats = cached_app_stats()
+        st.markdown("### 📊 App Stats")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("👥 Students", stats["total_users"])
+            st.metric("📖 Sessions", stats["total_sessions"])
+        with col2:
+            st.metric("❓ MCQs", f"{stats['total_mcqs']:,}")
+            st.metric("📝 Tests", stats["total_tests"])
+
+        st.divider()
 
                 # ── Daily Tip ──
         st.markdown("### 💡 Study Tip of the Day")
@@ -669,6 +703,30 @@ def show_dashboard():
         f"<small style='color:gray'>📅 {datetime.now().strftime('%A, %d %B %Y')}</small>",
         unsafe_allow_html=True
     )
+    # st.divider()
+
+     # ── COURSES BIG BUTTON ──
+    st.write("")
+    st.markdown("""
+    <div style='text-align:center; margin:10px 0 5px'>
+        <p style='color:gray; font-size:13px; margin-bottom:8px'>
+            🎓 Build professional skills with AI-powered courses
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    col_l, col_c, col_r = st.columns([1, 2, 1])
+    with col_c:
+        if st.button(
+            "🎓  EXPLORE COURSES  →",
+            use_container_width=True,
+            key="dashboard_courses_btn",
+            type="primary"
+        ):
+            st.session_state.show_courses = True
+            st.rerun()
+
+    st.write("")
     st.divider()
 
     # Stats
@@ -699,6 +757,32 @@ def show_dashboard():
         </div>""", unsafe_allow_html=True)
 
     st.write("")
+
+    # ── Streak Widget ──
+    streak = get_streak(user["id"])
+    current_streak = streak.get("current_streak", 0)
+    flame = "🔥" * min(current_streak, 5) or "⬜"
+    st.markdown(f"""
+    <div style='background:linear-gradient(135deg,#FF6D00,#FFB300);
+    border-radius:12px; padding:14px 20px; color:white;
+    display:flex; justify-content:space-between;
+    align-items:center; margin:10px 0'>
+        <div>
+            <div style='font-size:14px; opacity:0.9'>
+                🔥 Study Streak
+            </div>
+            <div style='font-size:28px; font-weight:800'>
+                {current_streak} Days
+            </div>
+            <div style='font-size:11px; opacity:0.8'>
+                Best: {streak.get('longest_streak', 0)} days
+            </div>
+        </div>
+        <div style='font-size:36px; letter-spacing:2px'>
+            {flame}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # Motivational message based on score
     avg = stats["avg_score"]
@@ -960,6 +1044,8 @@ def show_generate_page():
 
         st.success(f"✅ {len(parsed)} MCQs Generated & Saved!")
         st.rerun()
+
+        update_streak(st.session_state.user["id"])
 
             # Subtle support prompt
         st.markdown("""
@@ -1392,9 +1478,8 @@ def show_notes_page():
                 mime="application/pdf",
                 use_container_width=True
             )
-            st.success(
-                f"✅ PDF ready: **{st.session_state.pdf_filename}**"
-            )
+            st.success(f"Notes saved for {subject} - {topic}!")
+
             st.markdown("""
             <div class="warning-box">
                 💡 <b>Tip:</b> Clear notes content before
@@ -1479,6 +1564,184 @@ def show_share_bar(app_url):
     </div>
     """, unsafe_allow_html=True)
 
+#_─────────────────────────────────────────────
+#---------------2 additional functions for main flow---------------
+#----------------  ─────────────────────────────────────────────
+
+def _show_auth_with_session():
+    """Auth page that creates persistent session on login"""
+    from database import login_user, create_user, save_terms_acceptance
+    from terms import show_terms_page, show_terms_checkbox
+
+    # Forgot/Reset modes
+    if st.session_state.get("forgot_mode"):
+        from auth import show_forgot_password
+        show_forgot_password()
+        return
+    if st.session_state.get("reset_mode"):
+        from auth import show_reset_password
+        show_reset_password()
+        return
+
+    st.title("📚 StudyMate AI")
+    st.subheader("Smart Study Companion for Pakistani Students")
+    st.divider()
+
+    tab1, tab2, tab3 = st.tabs([
+        "🔑 Login", "📝 Sign Up", "📋 Terms"
+    ])
+
+    with tab1:
+        st.markdown("### Welcome Back! 👋")
+        email    = st.text_input(
+            "📧 Email", key="li_email",
+            placeholder="your@email.com"
+        )
+        password = st.text_input(
+            "🔒 Password", type="password",
+            key="li_pwd"
+        )
+        remember = st.checkbox(
+            "🔒 Keep me logged in", value=True
+        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button(
+                "🔑 Login",
+                use_container_width=True,
+                key="login_main_btn"
+            ):
+                if not email or not password:
+                    st.error("❌ Fill all fields.")
+                else:
+                    success, user, msg = login_user(
+                        email, password
+                    )
+                    if success:
+                        st.session_state.logged_in = True
+                        st.session_state.user      = user
+                        if remember:
+                            token = create_session(user["id"])
+                            st.session_state.session_token = token
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {msg}")
+        with col2:
+            if st.button(
+                "🔐 Forgot Password?",
+                use_container_width=True,
+                key="forgot_main"
+            ):
+                st.session_state.forgot_mode = True
+                st.rerun()
+
+    with tab2:
+        from auth import show_signup
+        show_signup()
+
+    with tab3:
+        from terms import show_terms_page
+        show_terms_page()
+
+
+def _show_main_app(user):
+    """Main app for logged-in users"""
+
+    # Header
+    col1, col2 = st.columns([5, 1])
+    with col1:
+        st.title("📚 StudyMate AI")
+    with col2:
+        st.write("")
+        if st.button("🚪 Logout", key="logout_btn"):
+            # Delete session token
+            if st.session_state.get("session_token"):
+                delete_session(
+                    st.session_state.session_token
+                )
+            # Clear all state
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+
+    # Share bar
+    APP_URL = os.getenv("APP_URL", "http://localhost:8501")
+    show_share_bar(APP_URL)
+    st.write("")
+
+    # ── Tabs ──
+    tab1, tab2, tab3, tab4, tab5, \
+    tab6, tab7, tab8, tab9, tab10, \
+    tab11, tab12, tab13 = st.tabs([
+        "🏠 Dashboard",
+        "🤖 AI Tutor",
+        "🔥 Streak",
+        "🚀 Generate MCQs",
+        "📝 Smart Notes",
+        "✅ Assessment",
+        "📊 My Progress",
+        "⏳ Exam Countdown",
+        "📚 Notes Library",
+        "📄 Past Papers",
+        "👥 Community",
+        "📖 History",
+        "💙 Support Us",
+    ])
+
+    # ── Course Platform — full page override ──
+    if st.session_state.get("show_courses"):
+        # Back button
+        if st.button(
+            "← Back to Dashboard",
+            key="back_from_courses_main"
+        ):
+            st.session_state.show_courses = False
+            # Reset course navigation
+            st.session_state.lp_view = "home"
+            st.rerun()
+
+        show_learning_platform(user)
+        st.stop()
+
+    # ── Normal tabs ──
+    with tab1:
+        show_dashboard()
+    with tab2:
+        show_chat_tutor(user)
+    with tab3:
+        show_streak_tracker(user)
+    with tab4:
+        show_generate_page()
+    with tab5:
+        show_notes_page()
+    with tab6:
+        show_assessment_page()
+    with tab7:
+        show_progress_charts(user["id"])
+    with tab8:
+        show_exam_countdown(user["id"])
+    with tab9:
+        show_admin_notes_student()
+    with tab10:
+        show_past_papers_student()
+    with tab11:
+        show_community_page(user)
+    with tab12:
+        show_history_page()
+    with tab13:
+        show_support_page()
+# ── Footer ──
+    st.divider()
+    st.markdown("""
+    <div style='text-align:center;color:gray;
+    font-size:12px;padding:10px 0'>
+        📚 <b>StudyMate AI v9.0</b> |
+        Built with ❤️ for Pakistani Students |
+        Developer: <b>Aftab Ahmed</b> |
+        © 2025 All Rights Reserved
+    </div>
+    """, unsafe_allow_html=True)
 
 # ============================================
 # MAIN APP FLOW
@@ -1504,68 +1767,7 @@ if st.session_state.get("show_admin"):
     st.stop()
 
 if not st.session_state.logged_in:
-    show_auth_page()
+    _show_auth_with_session()   # Try to restore session if exists, else show login/signup
 else:
     user = st.session_state.user
-
-    col1, col2 = st.columns([5, 1])
-    with col1:
-        st.title("📚 StudyMate AI")
-    with col2:
-        st.write("")
-        if st.button("🚪 Logout"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
-
-    # ── Share Bar ── (correctly outside logout block)
-    APP_URL = os.getenv("APP_URL", "http://localhost:8501")
-    show_share_bar(APP_URL)
-    st.write("")
-
-    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
-        "🏠 Dashboard",
-        "🚀 Generate MCQs",
-        "📝 Smart Notes",
-        "✅ Assessment",
-        "📊 My Progress",
-        "⏳ Exam Countdown",
-        "📚 Notes Library",
-        "📄 Past Papers",
-        "👥 Community",
-        "📖 History",
-        "💙 Support Us"
-    ])
-
-    with tab1:
-        show_dashboard()
-    with tab2:
-        show_generate_page()
-    with tab3:
-        show_notes_page()
-    with tab4:
-        show_assessment_page()
-    with tab5:
-        show_progress_charts(user["id"])
-    with tab6:
-        show_exam_countdown(user["id"])
-    with tab7:
-        show_admin_notes_student()
-    with tab8:
-        show_past_papers_student()
-    with tab9:
-        show_community_page(user)
-    with tab10:
-        show_history_page()
-    with tab11:
-        show_support_page()
-        
-# ── Footer ──
-st.divider()
-st.markdown("""
-<div style='text-align:center; color:gray; font-size:12px; padding:10px 0'>
-    📚 <b>StudyMate AI v6.0</b> | Built with ❤️ for Pakistani Students |
-    Developer: <b>Aftab Ahmed</b> |
-    © 2025 All Rights Reserved
-</div>
-""", unsafe_allow_html=True)
+    _show_main_app(user)    # Show main app with tabs

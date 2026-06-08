@@ -99,6 +99,10 @@ def show_login():
                 if success:
                     st.session_state.logged_in = True
                     st.session_state.user = user
+                    # Create persistent session
+                    from session_manager import create_session
+                    token = create_session(user["id"])
+                    st.session_state.session_token = token
                     st.rerun()
                 else:
                     st.error(f"❌ {message}")

@@ -223,6 +223,60 @@ def initialize_database():
         )
     """)
 
+    # Chat history table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS chat_history (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,
+            role       TEXT NOT NULL,
+            message    TEXT NOT NULL,
+            subject    TEXT,
+            language   TEXT DEFAULT 'english',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
+    # Study streaks table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS study_streaks (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER UNIQUE NOT NULL,
+            current_streak  INTEGER DEFAULT 0,
+            longest_streak  INTEGER DEFAULT 0,
+            last_study_date TEXT,
+            total_days      INTEGER DEFAULT 0,
+            created_at      TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
+    # Daily activity log
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS daily_activity (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,
+            activity   TEXT NOT NULL,
+            date       TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
+    # User preferences table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_preferences (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id      INTEGER UNIQUE NOT NULL,
+            language     TEXT DEFAULT 'english',
+            daily_goal   INTEGER DEFAULT 20,
+            notify_email INTEGER DEFAULT 0,
+            theme        TEXT DEFAULT 'light',
+            created_at   TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
     # Update users table — add account_type column safely
     try:
         cursor.execute(
@@ -1203,4 +1257,215 @@ def increment_note_downloads(note_id):
         conn.close()
         return True
     except Exception:
+        return False
+    # ============================================
+# CHAT HISTORY OPERATIONS
+# ============================================
+
+def save_chat_message(user_id, role, message,
+                      subject="", language="english"):
+    """Save a single chat message"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO chat_history
+            (user_id, role, message, subject, language)
+            VALUES (?, ?, ?, ?, ?)
+        """, (user_id, role, message, subject, language))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"save_chat_message error: {e}")
+        return False
+
+
+def get_chat_history(user_id, limit=50, subject=None):
+    """Get recent chat history for a user"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    query = """
+        SELECT * FROM chat_history
+        WHERE user_id = ?
+    """
+    params = [user_id]
+    if subject:
+        query += " AND subject = ?"
+        params.append(subject)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
+    cursor.execute(query, params)
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in reversed(rows)]
+
+
+def clear_chat_history(user_id):
+    """Clear all chat history for a user"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM chat_history WHERE user_id = ?",
+            (user_id,)
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception:
+        return False
+
+
+# ============================================
+# STREAK OPERATIONS
+# ============================================
+
+def update_streak(user_id):
+    """Update study streak when student is active"""
+    from datetime import datetime, date, timedelta
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        today = str(date.today())
+        now   = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Log today's activity
+        cursor.execute("""
+            INSERT OR IGNORE INTO daily_activity
+            (user_id, activity, date)
+            VALUES (?, 'study', ?)
+        """, (user_id, today))
+
+        # Get existing streak record
+        cursor.execute("""
+            SELECT * FROM study_streaks WHERE user_id = ?
+        """, (user_id,))
+        streak = cursor.fetchone()
+
+        if not streak:
+            # First time — create record
+            cursor.execute("""
+                INSERT INTO study_streaks
+                (user_id, current_streak, longest_streak,
+                 last_study_date, total_days)
+                VALUES (?, 1, 1, ?, 1)
+            """, (user_id, today))
+        else:
+            streak = dict(streak)
+            last   = streak["last_study_date"]
+
+            if last == today:
+                # Already counted today
+                conn.commit()
+                conn.close()
+                return
+
+            yesterday = str(date.today() - timedelta(days=1))
+
+            if last == yesterday:
+                # Consecutive day — increment streak
+                new_streak = streak["current_streak"] + 1
+                longest    = max(
+                    new_streak, streak["longest_streak"]
+                )
+                cursor.execute("""
+                    UPDATE study_streaks
+                    SET current_streak  = ?,
+                        longest_streak  = ?,
+                        last_study_date = ?,
+                        total_days      = total_days + 1
+                    WHERE user_id = ?
+                """, (new_streak, longest, today, user_id))
+            else:
+                # Streak broken — reset to 1
+                cursor.execute("""
+                    UPDATE study_streaks
+                    SET current_streak  = 1,
+                        last_study_date = ?,
+                        total_days      = total_days + 1
+                    WHERE user_id = ?
+                """, (today, user_id))
+
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"update_streak error: {e}")
+
+
+def get_streak(user_id):
+    """Get streak data for a user"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM study_streaks WHERE user_id = ?
+    """, (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else {
+        "current_streak": 0,
+        "longest_streak": 0,
+        "total_days": 0,
+        "last_study_date": None
+    }
+
+
+def get_activity_calendar(user_id, days=30):
+    """Get activity for last N days"""
+    from datetime import date, timedelta
+    conn = get_connection()
+    cursor = conn.cursor()
+    start = str(date.today() - timedelta(days=days))
+    cursor.execute("""
+        SELECT DISTINCT date FROM daily_activity
+        WHERE user_id = ? AND date >= ?
+        ORDER BY date ASC
+    """, (user_id, start))
+    rows = cursor.fetchall()
+    conn.close()
+    return [r["date"] for r in rows]
+
+
+# ============================================
+# USER PREFERENCES
+# ============================================
+
+def get_user_preferences(user_id):
+    """Get user preferences"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT * FROM user_preferences WHERE user_id = ?
+    """, (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    # Return defaults
+    return {
+        "language":   "english",
+        "daily_goal": 20,
+        "theme":      "light"
+    }
+
+
+def save_user_preferences(user_id, language="english",
+                           daily_goal=20):
+    """Save or update user preferences"""
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO user_preferences
+            (user_id, language, daily_goal)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                language   = excluded.language,
+                daily_goal = excluded.daily_goal
+        """, (user_id, language, daily_goal))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        print(f"save_preferences error: {e}")
         return False
